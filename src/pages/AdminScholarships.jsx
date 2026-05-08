@@ -15,6 +15,7 @@ import {
   XCircle,
   X,
   Loader2,
+  FileText,
 } from "lucide-react";
 import { apiService } from "../services/api";
 import "../styles/AdminScholarships.css";
@@ -28,6 +29,7 @@ function AdminScholarships() {
   const [scholarships, setScholarships] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [generatingReport, setGeneratingReport] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -73,6 +75,34 @@ function AdminScholarships() {
     }
     return true;
   });
+
+  // Handle scholarship list report generation
+  const handleGenerateReport = async () => {
+    try {
+      setGeneratingReport(true);
+      console.log('Generating scholarship list report...');
+
+      const pdfBlob = await apiService.generateScholarshipListReport();
+      const filename = `scholarship-list-report-${new Date().toISOString().split('T')[0]}.pdf`;
+
+      // Download the PDF
+      const url = window.URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      alert('Scholarship list report generated successfully!');
+    } catch (err) {
+      console.error('Error generating report:', err);
+      alert('Failed to generate report: ' + (err.message || 'Unknown error'));
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
 
   const handleEdit = (scholarship) => {
     setEditingScholarship(scholarship);
@@ -166,10 +196,25 @@ function AdminScholarships() {
           <h1>Manage Scholarships</h1>
           <p>Add, edit, and manage scholarship programs</p>
         </div>
-        <button className="add-btn" onClick={() => setShowAddModal(true)}>
-          <Plus className="btn-icon" />
-          Add Scholarship
-        </button>
+        <div className="header-buttons" style={{ display: 'flex', gap: '10px' }}>
+          <button className="export-btn" onClick={handleGenerateReport} disabled={generatingReport}>
+            {generatingReport ? (
+              <>
+                <Loader2 className="btn-icon loading" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <FileText className="btn-icon" />
+                Generate Report
+              </>
+            )}
+          </button>
+          <button className="add-btn" onClick={() => setShowAddModal(true)}>
+            <Plus className="btn-icon" />
+            Add Scholarship
+          </button>
+        </div>
       </div>
 
       {/* Filters Bar */}

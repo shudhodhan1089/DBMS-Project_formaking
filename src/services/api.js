@@ -254,6 +254,24 @@ class ApiService {
     // Return blob for PDF download
     return response.blob();
   }
+
+  // Scholarship List Report API - Generate scholarship list report with stats
+  async generateScholarshipListReport() {
+    const response = await fetch(`${API_BASE_URL}/reports/scholarship-list`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/pdf',
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Failed to generate scholarship list report' }));
+      throw new Error(errorData.error || 'Failed to generate scholarship list report');
+    }
+
+    // Return blob for PDF download
+    return response.blob();
+  }
 }
 
 export const apiService = new ApiService();

@@ -772,4 +772,391 @@ function generateCertificateHTML(data, logoBase64) {
   `;
 }
 
+// Generate Scholarship List Report
+router.get('/scholarship-list', async (req, res) => {
+  let browser = null;
+  try {
+    console.log('Generating scholarship list report...');
+    
+    const today = new Date();
+    
+    // Fetch all scholarships
+    const { data: scholarships, error: scholarshipsError } = await supabase
+      .from('scholarships')
+      .select('scholarship_id, name, category, amount, deadline, is_active, created_at');
+    
+    if (scholarshipsError) throw scholarshipsError;
+    
+    // Fetch all applications with their scholarship_id and status
+    const { data: applications, error: appError } = await supabase
+      .from('applications')
+      .select('scholarship_id, status');
+    
+    if (appError) throw appError;
+    
+    // Calculate stats for each scholarship
+    const scholarshipsWithStats = scholarships.map(scholarship => {
+      const scholarshipApps = applications.filter(app => app.scholarship_id === scholarship.scholarship_id);
+      const totalApplied = scholarshipApps.length;
+      const accepted = scholarshipApps.filter(app => app.status === 'approved').length;
+      const rejected = scholarshipApps.filter(app => app.status === 'rejected').length;
+      const pending = scholarshipApps.filter(app => app.status === 'pending').length;
+      
+      // Determine if scholarship is active (deadline hasn't passed)
+      const deadline = new Date(scholarship.deadline);
+      const isActive = deadline >= today && scholarship.is_active;
+      
+      return {
+        ...scholarship,
+        totalApplied,
+        accepted,
+        rejected,
+        pending,
+        isActive
+      };
+    });
+    
+    // Separate active and past scholarships
+    const activeScholarships = scholarshipsWithStats.filter(s => s.isActive);
+    const pastScholarships = scholarshipsWithStats.filter(s => !s.isActive);
+    
+    // Launch puppeteer
+    browser = await puppeteer.launch({
+      // executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe",
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--font-render-hinting=none'
+      ]
+    });
+    
+    const page = await browser.newPage();
+    
+    // Generate HTML
+    const htmlContent = generateScholarshipListHTML(activeScholarships, pastScholarships, logoBase64);
+    
+    await page.setContent(htmlContent, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    });
+    
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Generate PDF
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+      preferCSSPageSize: true
+    });
+    
+    await browser.close();
+    browser = null;
+    
+    // Send PDF
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=scholarship-list-report-${new Date().toISOString().split('T')[0]}.pdf`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(Buffer.from(pdfBuffer));
+    
+  } catch (error) {
+    console.error('Error generating scholarship list report:', error);
+    if (browser) {
+      try { await browser.close(); } catch (e) {}
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Generate Scholarship List HTML
+function generateScholarshipListHTML(activeScholarships, pastScholarships, logoBase64) {
+  const logoHtml = logoBase64
+    ? `<img src="${logoBase64}" alt="VJTI Logo" class="vjti-logo-img" />`
+    : '<div class="vjti-logo-placeholder">VJTI</div>';
+    
+  // Helper function to generate table rows
+  const generateTableRows = (scholarships) => {
+    if (scholarships.length === 0) {
+      return '<tr><td colspan="6" style="text-align: center; padding: 20px;">No scholarships found</td></tr>';
+    }
+    return scholarships.map((s, index) => `
+      <tr>
+        <td style="text-align: center; padding: 10px; border: 1px solid #000;">${index + 1}</td>
+        <td style="text-align: center; padding: 10px; border: 1px solid #000;">${s.scholarship_id.substring(0, 8).toUpperCase()}...</td>
+        <td style="text-align: left; padding: 10px; border: 1px solid #000;">${s.name}</td>
+        <td style="text-align: center; padding: 10px; border: 1px solid #000;">${s.category || 'All'}</td>
+        <td style="text-align: center; padding: 10px; border: 1px solid #000;">${s.totalApplied}</td>
+        <td style="text-align: center; padding: 10px; border: 1px solid #000;">${s.accepted}</td>
+        <td style="text-align: center; padding: 10px; border: 1px solid #000;">${s.rejected}</td>
+      </tr>
+    `).join('');
+  };
+  
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>Scholarship List Report - VJTI</title>
+      <style>
+        @page {
+          size: A4 landscape;
+          margin: 15mm;
+        }
+        
+        * {
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
+        }
+        
+        body {
+          font-family: 'Times New Roman', Times, serif;
+          font-size: 11pt;
+          line-height: 1.4;
+          color: #000;
+          background: white;
+        }
+        
+        /* VJTI Header */
+        .vjti-header {
+          display: flex;
+          align-items: flex-start;
+          gap: 20px;
+          margin-bottom: 20px;
+          padding-bottom: 15px;
+        }
+        
+        .vjti-logo-img {
+          width: 80px;
+          height: 80px;
+          object-fit: contain;
+          flex-shrink: 0;
+        }
+        
+        .vjti-logo-placeholder {
+          width: 80px;
+          height: 80px;
+          border: 2px solid #000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 14px;
+          font-weight: bold;
+          flex-shrink: 0;
+        }
+        
+        .vjti-info {
+          flex: 1;
+        }
+        
+        .vjti-info h1 {
+          font-size: 24pt;
+          font-weight: bold;
+          margin: 0;
+          letter-spacing: 2px;
+        }
+        
+        .vjti-info .hindi-name {
+          font-size: 16pt;
+          margin: 3px 0;
+        }
+        
+        .vjti-info .english-name {
+          font-size: 11pt;
+          font-weight: bold;
+          margin: 2px 0;
+        }
+        
+        .vjti-info .address {
+          font-size: 9pt;
+          line-height: 1.3;
+          margin-top: 3px;
+        }
+        
+        /* Title */
+        .report-title {
+          text-align: center;
+          font-size: 18pt;
+          font-weight: bold;
+          margin: 25px 0 15px 0;
+          text-decoration: underline;
+        }
+        
+        /* Description */
+        .report-description {
+          text-align: justify;
+          font-size: 11pt;
+          margin-bottom: 20px;
+          line-height: 1.6;
+        }
+        
+        /* Section Headers */
+        .section-title {
+          font-size: 13pt;
+          font-weight: bold;
+          margin: 20px 0 10px 0;
+          text-decoration: underline;
+        }
+        
+        /* Tables */
+        .scholarship-table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 20px;
+          font-size: 10pt;
+        }
+        
+        .scholarship-table th {
+          background-color: #f0f0f0;
+          border: 1px solid #000;
+          padding: 8px;
+          font-weight: bold;
+          text-align: center;
+        }
+        
+        .scholarship-table td {
+          border: 1px solid #000;
+          padding: 8px;
+        }
+        
+        .scholarship-table tr:nth-child(even) {
+          background-color: #fafafa;
+        }
+        
+        /* Stats Summary */
+        .stats-summary {
+          display: flex;
+          gap: 30px;
+          margin: 20px 0;
+          padding: 15px;
+          background-color: #f5f5f5;
+          border: 1px solid #ddd;
+        }
+        
+        .stat-box {
+          text-align: center;
+        }
+        
+        .stat-box .label {
+          font-size: 10pt;
+          color: #666;
+        }
+        
+        .stat-box .value {
+          font-size: 14pt;
+          font-weight: bold;
+          color: #000;
+        }
+        
+        /* Footer */
+        .footer {
+          margin-top: 30px;
+          padding-top: 10px;
+          border-top: 1px solid #ccc;
+          font-size: 8pt;
+          text-align: center;
+          color: #666;
+        }
+        
+        .page-info {
+          text-align: right;
+          font-size: 9pt;
+          margin-top: 10px;
+        }
+      </style>
+    </head>
+    <body>
+      <!-- VJTI Header -->
+      <div class="vjti-header">
+        ${logoHtml}
+        <div class="vjti-info">
+          <h1>VJTI MUMBAI</h1>
+          <div class="hindi-name">वीरमाता जिजाबाई तंत्रज्ञान संस्था</div>
+          <div class="english-name">Veeramata Jijabai Technological Institute</div>
+          <div class="english-name">(Autonomous Institute of Govt. of Maharashtra)</div>
+          <div class="address">
+            H. R. Mahajani Road, Matunga(East), Mumbai - 400 019<br>
+            Phone: +91 22 24198101/102 • Fax: +91 22 24102874 • www.vjti.ac.in
+          </div>
+        </div>
+      </div>
+      
+      <!-- Report Title -->
+      <div class="report-title">Scholarship List</div>
+      
+      <!-- Report Description -->
+      <div class="report-description">
+        The report contains the list of all the scholarships provided by VJTI institute. The list document has two parts: 
+        first part contains the list of all the scholarships that are currently active. The second part contains the list of all 
+        the scholarships which are not active.
+      </div>
+      
+      <!-- Stats Summary -->
+      <div class="stats-summary">
+        <div class="stat-box">
+          <div class="label">Active Scholarships</div>
+          <div class="value">${activeScholarships.length}</div>
+        </div>
+        <div class="stat-box">
+          <div class="label">Past Scholarships</div>
+          <div class="value">${pastScholarships.length}</div>
+        </div>
+        <div class="stat-box">
+          <div class="label">Total Applications</div>
+          <div class="value">${activeScholarships.reduce((sum, s) => sum + s.totalApplied, 0) + pastScholarships.reduce((sum, s) => sum + s.totalApplied, 0)}</div>
+        </div>
+      </div>
+      
+      <!-- Active Scholarships -->
+      <div class="section-title">Active Scholarships</div>
+      <table class="scholarship-table">
+        <thead>
+          <tr>
+            <th style="width: 5%;">Sr. No</th>
+            <th style="width: 12%;">Scholarship Id</th>
+            <th style="width: 35%;">Scholarship Name</th>
+            <th style="width: 12%;">Category</th>
+            <th style="width: 12%;">Total Applied</th>
+            <th style="width: 12%;">Accepted</th>
+            <th style="width: 12%;">Rejected</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${generateTableRows(activeScholarships)}
+        </tbody>
+      </table>
+      
+      <!-- Past Scholarships -->
+      <div class="section-title">Past Scholarships</div>
+      <table class="scholarship-table">
+        <thead>
+          <tr>
+            <th style="width: 5%;">Sr. No</th>
+            <th style="width: 12%;">Scholarship Id</th>
+            <th style="width: 35%;">Scholarship Name</th>
+            <th style="width: 12%;">Category</th>
+            <th style="width: 12%;">Total Applied</th>
+            <th style="width: 12%;">Accepted</th>
+            <th style="width: 12%;">Rejected</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${generateTableRows(pastScholarships)}
+        </tbody>
+      </table>
+      
+      <!-- Footer -->
+      <div class="footer">
+        This report was generated by ScholarSphere Scholarship Management System<br>
+        © ${new Date().getFullYear()} VJTI | Generated on: ${new Date().toLocaleDateString('en-IN')}
+      </div>
+    </body>
+    </html>
+  `;
+}
+
 export default router;
