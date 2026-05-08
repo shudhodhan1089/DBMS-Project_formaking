@@ -74,7 +74,7 @@ router.post('/generate', async (req, res) => {
     
     // Launch puppeteer with system Chrome
     browser = await puppeteer.launch({ 
-      executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe",
+      // executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe",
       headless: true,
       args: [
         '--no-sandbox', 
